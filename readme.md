@@ -1,11 +1,12 @@
 ### Installation
-1. Add `-condebug -conclearlog` to your CS2 launch options
+1. Add `-condebug -conclearlog` to your cs2 launch options
 2. Download [cs2kz-overlay](https://github.com/YesSeir/cs2kz-overlay/releases)
 3. Run `cs2kz-overlay.exe`
 4. Add a browser source in OBS pointed at `http://localhost:4433`
 5. For progress widget in OBS pointed at `http://localhost:4433/progress`
 6. For local gameplay u can use my [cs2kz-pack](https://github.com/YesSeir/cs2kz-pack)
 7. For local progress u can use it `http://localhost:4433/progress?type=all&course=main&global=false`
+8. When u join on server just type `!mapoverlay` and all will work
 
 ### Parameters
 
