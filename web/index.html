@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>cs2kz-overlay</title>
+    <style>
+        @font-face {
+            font-family: 'WorkSans';
+            src: url('/fonts/WorkSans-VariableFont_wght.ttf') format('truetype');
+            font-weight: 400 700;
+            font-style: normal;
+            font-display: swap;
+        }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'WorkSans', Arial, Helvetica, sans-serif;
+            background: transparent;
+            color: #f3f4f6;
+        }
+        .overlay {
+            margin: 1rem;
+            border-radius: 0.375rem;
+            font-size: 1.5rem;
+            line-height: 1.5;
+        }
+        .flex {
+            display: flex;
+        }
+        .items-center {
+            align-items: center;
+        }
+        .items-start {
+            align-items: flex-start;
+        }
+        .gap-1 {
+            gap: 0.25rem;
+        }
+        .gap-1-5 {
+            gap: 0.375rem;
+        }
+        .gap-2 {
+            gap: 0.5rem;
+        }
+        .gap-3 {
+            gap: 0.75rem;
+        }
+        .gap-6 {
+            gap: 1.5rem;
+        }
+        .text-gray-400 {
+            color: #9ca3af;
+        }
+        .text-gray-300 {
+            color: #d1d5db;
+        }
+        .text-gray-100 {
+            color: #f3f4f6;
+        }
+        .text-white {
+            color: #fff;
+        }
+        .text-yellow-600 {
+            color: #ca8a04;
+        }
+        .text-blue-600 {
+            color: #2563eb;
+        }
+        .text-cyan-500 {
+            color: #06b6d4;
+        }
+        .text-green-500 {
+            color: #22c55e;
+        }
+        .text-amber-600 {
+            color: #d97706;
+        }
+        .text-yellow-300 {
+            color: #fde047;
+        }
+        .text-green-300 {
+            color: #86efac;
+        }
+        .bg-yellow-900 {
+            background-color: rgba(120, 53, 15, 0.9);
+        }
+        .bg-green-900 {
+            background-color: rgba(20, 83, 45, 0.9);
+        }
+        .bg-yellow-600 {
+            background-color: #ca8a04;
+        }
+        .bg-blue-600 {
+            background-color: #2563eb;
+        }
+        .px-1 {
+            padding-left: 0.25rem;
+            padding-right: 0.25rem;
+        }
+        .py-0-5 {
+            padding-top: 0.125rem;
+            padding-bottom: 0.125rem;
+        }
+        .rounded-sm {
+            border-radius: 0.25rem;
+        }
+        .text-sm {
+            font-size: 0.875rem;
+            line-height: 1.25;
+        }
+        .font-medium {
+            font-weight: 500;
+        }
+        .w-12 {
+            width: 3rem;
+        }
+        .text-right {
+            text-align: right;
+        }
+        .border {
+            border: 1px solid;
+        }
+        .record-row {
+            margin-top: 0.5rem;
+        }
+        .avatar {
+            border-radius: 9999px;
+            width: 2rem;
+            height: 2rem;
+            object-fit: cover;
+        }
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 0.25rem;
+            border-radius: 0.25rem;
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: #f3f4f6;
+            line-height: 1.4;
+        }
+        .badge-tp {
+            background-color: #ca8a04;
+        }
+        .badge-pro {
+            background-color: #2563eb;
+        }
+        .hidden {
+            display: none !important;
+        }
+        .label-all {
+            color: #ca8a04;
+        }
+        .label-pro {
+            color: #2563eb;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 0.10rem 0.40rem;
+            border-radius: 0.25rem;
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: #fff;
+            line-height: 1.4;
+        }
+        .status-badge.global {
+            background-color: #22c55e;
+        }
+        .status-badge.non-global {
+            background-color: #ca8a04;
+        }
+    </style>
+</head>
+<body>
+    <div id="app" class="overlay"></div>
+    <script>
+        const tierColorMap = {
+            'very-easy': '#6bc96f',
+            'easy': '#33bd3a',
+            'medium': '#d8e302',
+            'advanced': '#FFC107',
+            'hard': '#e37910',
+            'very-hard': '#e34202',
+            'extreme': '#e31c02',
+            'death': '#bb02db',
+            'unfeasible': '#e800e1',
+            'impossible': '#d1d1d1'
+        };
+        const tierNumberMap = {
+            'very-easy': 1,
+            'easy': 2,
+            'medium': 3,
+            'advanced': 4,
+            'hard': 5,
+            'very-hard': 6,
+            'extreme': 7,
+            'death': 8,
+            'unfeasible': 9,
+            'impossible': 10
+        };
+        const numberToTier = Object.fromEntries(
+            Object.entries(tierNumberMap).map(([name, num]) => [num, name])
+        );
+
+        let externalMapsCache = null;
+        let externalMapsFetching = false;
+
+        async function fetchExternalMaps() {
+            if (externalMapsCache) return externalMapsCache;
+            if (externalMapsFetching) {
+                let tries = 0;
+                while (externalMapsFetching && tries < 30) {
+                    await new Promise(r => setTimeout(r, 100));
+                    tries++;
+                }
+                return externalMapsCache;
+            }
+            externalMapsFetching = true;
+            try {
+                const url = 'https://raw.githubusercontent.com/YesSeir/cs2kz-maps/main/maps.json';
+                const r = await fetch(url);
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                const data = await r.json();
+                externalMapsCache = data;
+                return data;
+            } catch (e) {
+                console.warn('[CS2KZ] Failed to fetch external maps.json:', e);
+                return null;
+            } finally {
+                externalMapsFetching = false;
+            }
+        }
+
+        function getExternalTiers(mapName, courseName, mode) {
+            if (!externalMapsCache || !mapName || !courseName) return null;
+            const entry = externalMapsCache.find(
+                e => e.mapname === mapName && e.coursename === courseName
+            );
+            if (!entry) return null;
+            const isClassic = (mode === 'classic');
+            const nub = isClassic ? entry.ckznubtier : entry.vnlnubtier;
+            const pro = isClassic ? entry.ckzprotier : entry.vnlprotier;
+            if (nub === undefined || nub === null || pro === undefined || pro === null) return null;
+            return { nub, pro };
+        }
+
+        function formatTime(sec) {
+            const h = Math.floor(sec / 3600),
+                m = Math.floor((sec % 3600) / 60),
+                s = (sec % 60).toFixed(3);
+            let parts = [];
+            if (h > 0) parts.push(String(h).padStart(2, '0'));
+            if (m > 0 || h > 0) parts.push(String(m).padStart(2, '0'));
+            parts.push(String(s).padStart(6, '0'));
+            return parts.join(':');
+        }
+
+        const state = {
+            mapName: '',
+            courseName: '',
+            modeName: '',
+            playerId: '',
+            timerStatus: '',
+            mapData: null,
+            overallWr: null,
+            proWr: null,
+            overallPb: null,
+            proPb: null,
+            playerProfile: null,
+            overallWrHolderProfile: null,
+            proWrHolderProfile: null,
+        };
+        const appEl = document.getElementById('app');
+
+        async function fetchProfile(steamId) {
+            if (!steamId) return null;
+            try {
+                const r = await fetch(`https://api.cs2kz.org/players/${steamId}/steam-profile`);
+                if (!r.ok) return null;
+                return await r.json();
+            } catch (e) { return null; }
+        }
+
+        async function fetchMapInfo(name) {
+            if (!name) return null;
+            try {
+                const r = await fetch(`https://api.cs2kz.org/maps/${name}`);
+                if (!r.ok) return null;
+                return await r.json();
+            } catch (e) { return null; }
+        }
+
+        async function fetchRecords(params) {
+            try {
+                const url = new URL('https://api.cs2kz.org/records');
+                Object.keys(params).forEach(k => url.searchParams.append(k, params[k]));
+                const r = await fetch(url);
+                if (!r.ok) return null;
+                return await r.json();
+            } catch (e) { return null; }
+        }
+
+        async function fetchLocalWr(mapName, courseName, mode, hasTeleports) {
+            const params = new URLSearchParams({
+                map: mapName,
+                course: courseName,
+                mode: mode === 'classic' ? 'classic' : 'vanilla',
+            });
+            if (hasTeleports !== undefined && hasTeleports !== null) {
+                params.append('teleports', hasTeleports ? '1' : '0');
+            }
+            try {
+                const resp = await fetch(`/local-wr?${params.toString()}`);
+                if (!resp.ok) return null;
+                const data = await resp.json();
+                if (data.found) {
+                    return {
+                        time: data.time,
+                        playerName: data.playerName,
+                        steamId: data.steamId,
+                    };
+                }
+                return null;
+            } catch (e) {
+                console.warn('Failed to fetch local WR:', e);
+                return null;
+            }
+        }
+
+        let previousMapName = '';
+        let previousCourseName = '';
+
+        async function updateUI() {
+            const { mapName, courseName, modeName, playerId } = state;
+            if (!mapName || mapName === '<empty>' || mapName === '') {
+                appEl.innerHTML = '';
+                return;
+            }
+
+            const mode = modeName === 'CKZ' ? 'classic' : 'vanilla';
+
+            if (mapName !== previousMapName || courseName !== previousCourseName) {
+                state.mapData = null;
+                previousMapName = mapName;
+                previousCourseName = courseName;
+            }
+
+            if (!state.mapData) {
+                state.mapData = await fetchMapInfo(mapName);
+            }
+            const mapData = state.mapData;
+            const mapStatus = (mapData && mapData.state === 'approved') ? 'GLOBAL' : 'NON-GLOBAL';
+
+            let courseTiers = null;
+            if (mapData && mode && courseName) {
+                const course = mapData.courses.find(c => c.name === courseName);
+                if (course && course.filters && course.filters[mode]) {
+                    const f = course.filters[mode];
+                    if (f.nub_tier && f.pro_tier) {
+                        courseTiers = {
+                            nub: tierNumberMap[f.nub_tier],
+                            pro: tierNumberMap[f.pro_tier]
+                        };
+                    }
+                }
+            }
+            if (!courseTiers && mapStatus === 'NON-GLOBAL' && courseName) {
+                await fetchExternalMaps();
+                const ext = getExternalTiers(mapName, courseName, mode);
+                if (ext) {
+                    courseTiers = { nub: ext.nub, pro: ext.pro };
+                }
+            }
+
+            let newOverallWr = state.overallWr;
+            let newProWr = state.proWr;
+            let newOverallPb = state.overallPb;
+            let newProPb = state.proPb;
+            let newOverallWrHolderProfile = state.overallWrHolderProfile;
+            let newProWrHolderProfile = state.proWrHolderProfile;
+            let newPlayerProfile = state.playerProfile;
+
+            if (mapStatus === 'GLOBAL' && courseName && mode && playerId) {
+                const pbOverall = await fetchRecords({ top: true, map: mapName, course: courseName, mode,
+                    player: playerId });
+                const pbPro = await fetchRecords({ top: true, map: mapName, course: courseName, mode,
+                    player: playerId, has_teleports: false });
+                newOverallPb = (pbOverall && pbOverall.values?.length) ? pbOverall.values[0] : null;
+                newProPb = (pbPro && pbPro.values?.length) ? pbPro.values[0] : null;
+
+                const wrOverall = await fetchRecords({ top: true, map: mapName, course: courseName, mode,
+                    max_rank: 1 });
+                const wrPro = await fetchRecords({ top: true, map: mapName, course: courseName, mode,
+                    has_teleports: false, max_rank: 1 });
+                newOverallWr = (wrOverall && wrOverall.values?.length) ? wrOverall.values[0] : null;
+                newProWr = (wrPro && wrPro.values?.length) ? wrPro.values[0] : null;
+
+                newOverallWrHolderProfile = newOverallWr ? await fetchProfile(newOverallWr.player.id) : null;
+                newProWrHolderProfile = newProWr ? await fetchProfile(newProWr.player.id) : null;
+                newPlayerProfile = playerId ? await fetchProfile(playerId) : null;
+            } else if (mapStatus === 'NON-GLOBAL' && courseName && mode) {
+                const wrAll = await fetchLocalWr(mapName, courseName, mode, null);
+                const wrPro = await fetchLocalWr(mapName, courseName, mode, false);
+
+                newOverallWr = wrAll ? {
+                    time: wrAll.time,
+                    player: { name: wrAll.playerName, id: wrAll.steamId },
+                    teleports: 1,
+                } : null;
+                newProWr = wrPro ? {
+                    time: wrPro.time,
+                    player: { name: wrPro.playerName, id: wrPro.steamId },
+                    teleports: 0,
+                } : null;
+                newOverallWrHolderProfile = wrAll ? await fetchProfile(wrAll.steamId) : null;
+                newProWrHolderProfile = wrPro ? await fetchProfile(wrPro.steamId) : null;
+                // для non-global PB нет
+                newOverallPb = null;
+                newProPb = null;
+                newPlayerProfile = null;
+            }
+
+            state.overallWr = newOverallWr;
+            state.proWr = newProWr;
+            state.overallPb = newOverallPb;
+            state.proPb = newProPb;
+            state.overallWrHolderProfile = newOverallWrHolderProfile;
+            state.proWrHolderProfile = newProWrHolderProfile;
+            state.playerProfile = newPlayerProfile;
+
+            let html = '';
+            if (mapName) {
+                html += `<div class="flex gap-3">`;
+                html += `<div class="flex items-center gap-3">`;
+                html +=
+                    `<div class="flex items-center gap-1"><span class="text-gray-400">Map:</span><span class="text-white font-medium">${mapName}</span></div>`;
+                if (mapStatus === 'NON-GLOBAL') {
+                    html += `<span class="status-badge non-global">NON-GLOBAL</span>`;
+                } else if (mapStatus === 'GLOBAL') {
+                    html += `<span class="status-badge global">GLOBAL</span>`;
+                }
+                html += `</div>`;
+
+                html += `<div class="flex gap-1">`;
+                if (courseName) {
+                    html +=
+                        `<div class="flex items-center gap-1"><span class="text-gray-400">Course:</span><span class="text-gray-100 font-medium">${courseName}</span>`;
+                    if (courseTiers) {
+                        html += `<span class="text-gray-400">(</span>`;
+                        const nubVal = courseTiers.nub;
+                        const proVal = courseTiers.pro;
+                        if (nubVal !== proVal) {
+                            if (nubVal === 0) {
+                                html += `<span>0</span>`;
+                            } else {
+                                const tierName = numberToTier[nubVal];
+                                html += `<span style="color:${tierColorMap[tierName]}">${nubVal}</span>`;
+                            }
+                            html += `<span class="text-gray-400">/</span>`;
+                            if (proVal === 0) {
+                                html += `<span>0</span>`;
+                            } else {
+                                const tierName = numberToTier[proVal];
+                                html += `<span style="color:${tierColorMap[tierName]}">${proVal}</span>`;
+                            }
+                        } else {
+                            if (nubVal === 0) {
+                                html += `<span>0</span>`;
+                            } else {
+                                const tierName = numberToTier[nubVal];
+                                html += `<span style="color:${tierColorMap[tierName]}">${nubVal}</span>`;
+                            }
+                        }
+                        html += `<span class="text-gray-400">)</span>`;
+                    }
+                    html += `</div>`;
+                }
+                html += `</div>`;
+                html += `</div>`;
+            }
+
+            if (courseName) {
+                if (state.overallWr || state.overallPb) {
+                    html += buildRecordRow('all', state.overallWr, state.overallPb, state.playerProfile,
+                        state.overallWrHolderProfile);
+                }
+                if (state.proWr || state.proPb) {
+                    html += buildRecordRow('pro', state.proWr, state.proPb, state.playerProfile,
+                        state.proWrHolderProfile);
+                }
+            }
+
+            appEl.innerHTML = html;
+        }
+
+        function buildRecordRow(type, wr, pb, playerProfile, wrHolderProfile) {
+            const label = type === 'all' ? 'ALL' : 'PRO';
+            const labelClass = type === 'all' ? 'label-all' : 'label-pro';
+            let row = `<div class="flex record-row gap-2">`;
+            row += `<span class="${labelClass} w-12 text-right">${label}</span>`;
+            row += `<span class="text-gray-400">|</span>`;
+
+            if (wr) {
+                const isTp = (wr.teleports !== undefined) ? wr.teleports > 0 : false;
+                const badgeClass = isTp ? 'badge-tp' : 'badge-pro';
+                const badgeText = isTp ? 'TP' : 'PRO';
+
+                const gain = (pb && pb.time) ? pb.time - wr.time : null;
+
+                row += `<div class="flex gap-3">`;
+                row += `<div class="flex items-start gap-1">`;
+                row += `<span class="text-gray-100">${formatTime(wr.time)}</span>`;
+                row += `<span class="badge ${badgeClass}">${badgeText}</span>`;
+                row += `</div>`;
+                row += `<span class="text-gray-300">by</span>`;
+
+                row += `<div class="flex gap-1-5">`;
+                if (wrHolderProfile) {
+                    row += `<img class="avatar" src="${wrHolderProfile.avatar_url}" alt="">`;
+                }
+                const nameClass = (gain !== null && gain === 0) ? 'text-green-500' : 'text-cyan-500';
+                row += `<span class="${nameClass}">${wr.player.name}</span>`;
+                row += `</div>`;
+
+                if (gain !== null && gain > 0) {
+                    row += `<span class="text-amber-600">(+${formatTime(gain)})</span>`;
+                }
+                row += `</div>`;
+            } else {
+                row += `<span class="text-gray-400">No WR yet</span>`;
+            }
+
+            if (pb) {
+                const rank = type === 'all' ? pb.nub_rank : pb.pro_rank;
+                if (rank !== null && rank !== undefined) {
+                    row += `<span class="text-gray-300"> #${rank}</span>`;
+                }
+                row += `</div>`;
+            }
+
+            row += `</div>`;
+            return row;
+        }
+
+        function initSSE() {
+            const es = new EventSource('http://127.0.0.1:4433/events');
+            es.onmessage = function(e) {
+                try {
+                    const data = JSON.parse(e.data);
+                    state.mapName = data.map || '';
+                    state.courseName = data.course || '';
+                    state.modeName = data.mode || '';
+                    state.playerId = data.steamID ? String(data.steamID) : '';
+                    state.timerStatus = data.timer || '';
+                    updateUI();
+                } catch (err) { console.warn('SSE parse error', err); }
+            };
+            es.onerror = function() { console.warn('SSE error, reconnecting...'); };
+        }
+        initSSE();
+    </script>
+</body>
+</html>

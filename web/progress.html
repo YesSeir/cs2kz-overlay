@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CS2KZ Progress</title>
+    <style>
+        @font-face {
+            font-family: 'WorkSans';
+            src: url('/fonts/WorkSans-VariableFont_wght.ttf') format('truetype');
+            font-weight: 400 700;
+            font-style: normal;
+            font-display: swap;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'WorkSans', Arial, Helvetica, sans-serif;
+            background: transparent;
+            color: #f3f4f6;
+        }
+        .widget {
+            position: fixed;
+            pointer-events: none;
+            user-select: none;
+            width: auto;
+            min-width: 320px;
+            max-width: 360px;
+            text-align: left;
+            margin: 1rem;
+            border-radius: 0.375rem;
+            font-size: 1.5rem;
+            line-height: 1.5;
+        }
+        .header {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            align-items: baseline;
+            font-size: inherit;
+            font-weight: 500;
+            color: #d1d5db;
+            margin-bottom: 0.5rem;
+            width: 100%;
+        }
+        .header .type-label {
+            color: #ca8a04;
+            text-align: left;
+        }
+        .header .type-label.pro {
+            color: #2563eb;
+        }
+        .header .course-name {
+            color: #f3f4f6;
+            text-align: center;
+            white-space: nowrap;
+        }
+        .header .stats {
+            color: #f3f4f6;
+            text-align: right;
+        }
+        .tier-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 0.375rem;
+        }
+        .tier-item {
+            background: transparent;
+            border-radius: 0.25rem;
+            padding: 0;
+            position: relative;
+        }
+        .tier-item .progress-bar-bg {
+            background: rgba(55, 65, 81, 0.5);
+            height: 2rem;
+            border-radius: 0.25rem;
+            overflow: hidden;
+            position: relative;
+        }
+        .tier-item .progress-bar-fill {
+            height: 100%;
+            border-radius: 0.25rem;
+            transition: width 0.4s ease;
+        }
+        .tier-item .progress-bar-text {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: inherit;
+            font-weight: 500;
+            color: #f3f4f6;
+            white-space: nowrap;
+            pointer-events: none;
+            line-height: 1;
+        }
+        .loading, .error {
+            text-align: center;
+            padding: 0.5rem 0;
+            color: #9ca3af;
+            font-size: inherit;
+        }
+        .error { color: #ef4444; }
+    </style>
+</head>
+<body>
+<div class="widget" id="widget">
+    <div class="header" id="header">
+        <span class="type-label" id="typeLabel">ALL</span>
+        <span class="course-name" id="courseName">Main</span>
+        <span class="stats" id="stats"><span>--</span> / --</span>
+    </div>
+    <div id="app">
+    </div>
+</div>
+
+<script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const typeParam = urlParams.get('type') || 'all';
+    const courseParam = urlParams.get('course') || 'main';
+    const globalParam = urlParams.get('global');
+    const global = globalParam === 'false' || globalParam === '0';
+
+    const tierColors = {
+        1: '#6bc96f', 2: '#33bd3a', 3: '#d8e302', 4: '#FFC107',
+        5: '#e37910', 6: '#e34202', 7: '#e31c02', 8: '#bb02db'
+    };
+
+    const typeLabels = {
+        all: { label: 'ALL', class: '' },
+        pro: { label: 'PRO', class: 'pro' }
+    };
+    const courseLabels = {
+        main: 'Main',
+        bonus: 'Bonus',
+        all: ''
+    };
+
+    let lastHtml = null;
+    let lastStatsHtml = null;
+    let isFirstLoad = true;
+
+    function updateHeader() {
+        const type = typeLabels[typeParam] || typeLabels.all;
+        const course = courseLabels[courseParam] || '';
+        document.getElementById('typeLabel').textContent = type.label;
+        document.getElementById('typeLabel').className = 'type-label' + (type.class ? ' ' + type.class : '');
+        document.getElementById('courseName').textContent = course;
+    }
+
+    async function fetchProgress(type, course, global) {
+        const url = `/api/progress?type=${type}&course=${course}&global=${global}`;
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        return resp.json();
+    }
+
+    function renderWidget(data) {
+        let totalCompleted = 0;
+        let totalAll = 0;
+        let html = '<div class="tier-grid">';
+        for (let tier = 1; tier <= 8; tier++) {
+            const info = data[tier.toString()] || { total: 0, completed: 0 };
+            const total = info.total || 0;
+            const completed = info.completed || 0;
+            totalCompleted += completed;
+            totalAll += total;
+            // Если total = 0, делаем ширину 100%, иначе считаем процент
+            const percent = total > 0 ? Math.round((completed / total) * 100) : 100;
+            const color = tierColors[tier] || '#ffffff';
+            const labelText = `${completed}/${total}`;
+            html += `
+                <div class="tier-item">
+                    <div class="progress-bar-bg">
+                        <div class="progress-bar-fill" style="width:${percent}%; background:${color};"></div>
+                        <div class="progress-bar-text">
+                            <span>${labelText}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        html += '</div>';
+        const statsHtml = `<span>${totalCompleted}</span> / ${totalAll}`;
+        return { html, statsHtml };
+    }
+
+    async function updateUI() {
+        const app = document.getElementById('app');
+        const statsEl = document.getElementById('stats');
+
+        if (isFirstLoad) {
+            app.innerHTML = '';
+            statsEl.innerHTML = '<span>--</span> / --';
+            isFirstLoad = false;
+        }
+
+        try {
+            const data = await fetchProgress(typeParam, courseParam, global);
+            const { html, statsHtml } = renderWidget(data);
+
+            if (html !== lastHtml) {
+                app.innerHTML = html;
+                lastHtml = html;
+            }
+            if (statsHtml !== lastStatsHtml) {
+                statsEl.innerHTML = statsHtml;
+                lastStatsHtml = statsHtml;
+            }
+        } catch (e) {
+            console.error('Failed to fetch progress:', e);
+            if (lastHtml === null) {
+                app.innerHTML = '<div class="error">❌ Failed</div>';
+                statsEl.innerHTML = '<span>--</span> / --';
+            }
+        }
+    }
+
+    updateHeader();
+    updateUI();
+    setInterval(updateUI, 10000);
+</script>
+</body>
+</html>
