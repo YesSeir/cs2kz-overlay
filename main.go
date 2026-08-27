@@ -22,13 +22,10 @@ import (
 	"github.com/getlantern/systray"
 )
 
-//go:embed icon.ico
 var iconData []byte
 
-//go:embed web
 var webFS embed.FS
 
-//go:embed web/progress.html
 var progressHTML string
 
 type GameState struct {
@@ -145,7 +142,6 @@ type APIRecordsResponse struct {
 	Values []APIRecord `json:"values"`
 }
 
-// ---------- GYM structures ----------
 type GymRecord struct {
 	MapName    string `json:"mapName"`
 	CourseName string `json:"courseName"`
@@ -154,13 +150,12 @@ type GymRecord struct {
 	Teleports  int    `json:"teleports"`
 	PlayerName string `json:"playerName"`
 	SteamID64  string `json:"steamId64"`
-	Rank       int    `json:"rank"` // добавим ранг для PB
+	Rank       int    `json:"rank"`
 }
 
 type GymRecordsResponse struct {
 	Entries []GymRecord `json:"entries"`
 }
-// ---------- end GYM structures ----------
 
 func loadGlobalApprovedMaps() error {
 	globalCacheMu.Lock()
@@ -255,7 +250,6 @@ func fetchPlayerRecords(steamID uint64, mode string, hasTeleports *bool) ([]APIR
 	return result.Values, nil
 }
 
-// ---------- GYM proxy handlers ----------
 func gymProxyHandler(w http.ResponseWriter, r *http.Request) {
 	mapName := r.URL.Query().Get("map")
 	mode := r.URL.Query().Get("mode")
@@ -314,7 +308,6 @@ func urlEncode(s string) string {
 	return strings.ReplaceAll(s, " ", "%20")
 }
 
-// fetchGymPlayerRecords вызывает внутренний прокси, чтобы обойти CORS
 func fetchGymPlayerRecords(steamID uint64, mode, category string) ([]GymRecord, error) {
 	url := fmt.Sprintf("http://127.0.0.1:4433/gym-proxy-player?steamid=%d&mode=%s&category=%s", steamID, mode, category)
 	resp, err := http.Get(url)
@@ -331,9 +324,7 @@ func fetchGymPlayerRecords(steamID uint64, mode, category string) ([]GymRecord, 
 	}
 	return result.Entries, nil
 }
-// ---------- end GYM ----------
 
-// ---------- apiProgressHandler с поддержкой global=gym и kzt ----------
 func apiProgressHandler(w http.ResponseWriter, r *http.Request) {
 	typeParam := r.URL.Query().Get("type")
 	courseParam := r.URL.Query().Get("course")
@@ -359,11 +350,10 @@ func apiProgressHandler(w http.ResponseWriter, r *http.Request) {
 	} else if mode == "KZT" {
 		modeStr = "kzt"
 	} else {
-		modeStr = "classic" // fallback
+		modeStr = "classic"
 	}
 	isPro := typeParam == "pro"
 
-	// ---------- GYM ----------
 	if globalParam == "gym" {
 		steamID := gameState.PlayerID
 		if steamID == 0 {
@@ -384,7 +374,6 @@ func apiProgressHandler(w http.ResponseWriter, r *http.Request) {
 		maps := serverMapsCache
 		serverMapsMu.RUnlock()
 
-		// Определяем gymMode: ckz, vnl, kzt
 		var gymMode string
 		switch strings.ToLower(modeStr) {
 		case "classic", "ckz":
@@ -485,9 +474,7 @@ func apiProgressHandler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(result)
 		return
 	}
-	// ---------- end GYM ----------
 
-	// ---------- ОРИГИНАЛЬНЫЙ КОД (без изменений) ----------
 	if globalParam == "false" || globalParam == "0" {
 		if err := loadGlobalApprovedMaps(); err != nil {
 			http.Error(w, "Failed to load global maps: "+err.Error(), http.StatusInternalServerError)
@@ -610,7 +597,6 @@ func apiProgressHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// global=false
 	if err := loadServerMaps(); err != nil {
 		http.Error(w, "Failed to load maps.json: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -704,13 +690,11 @@ func apiProgressHandler(w http.ResponseWriter, r *http.Request) {
 
 	var modeID int
 	if mode == "CKZ" || mode == "KZT" {
-		// В текущей логике KZT может использовать тот же modeID, что и CKZ, или отдельный – уточните.
-		// Пока оставим как CKZ (modeID=2), если нужно отдельно – измените.
 		modeID = 2
 	} else if mode == "VNL" || mode == "vanilla" {
 		modeID = 1
 	} else {
-		modeID = 2 // fallback
+		modeID = 2
 	}
 
 	teleportsCondition := ""
@@ -767,7 +751,6 @@ func apiProgressHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
 }
-// ---------- конец apiProgressHandler ----------
 
 func progressPageHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -801,7 +784,6 @@ func localWRHandler(w http.ResponseWriter, r *http.Request) {
 	if mode == "vanilla" {
 		modeID = 1
 	}
-	// Для KZT пока используем тот же modeID, что и CKZ (2) – при необходимости добавьте отдельный режим
 
 	root, err := getCS2Root()
 	if err != nil {
@@ -978,10 +960,8 @@ func listen() {
 	http.HandleFunc("/api/progress", apiProgressHandler)
 	http.HandleFunc("/progress", progressPageHandler)
 
-	// ---------- GYM proxy endpoints ----------
 	http.HandleFunc("/gym-proxy", gymProxyHandler)
 	http.HandleFunc("/gym-proxy-player", gymProxyPlayerHandler)
-	// ---------- end GYM ----------
 
 	go func() {
 		if err := http.ListenAndServe("127.0.0.1:4433", nil); err != nil {

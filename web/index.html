@@ -182,9 +182,6 @@
 <body>
     <div id="app" class="overlay"></div>
     <script>
-        // ==============================
-        // 1. TIER CONFIG
-        // ==============================
         const tierColorMap = {
             'very-easy': '#6bc96f',
             'easy': '#33bd3a',
@@ -206,15 +203,9 @@
             Object.entries(tierNumberMap).map(([name, num]) => [num, name])
         );
 
-        // ==============================
-        // 2. PARSE URL PARAMETER
-        // ==============================
         const urlParams = new URLSearchParams(window.location.search);
         const globalParam = urlParams.get('global') || 'default';
 
-        // ==============================
-        // 3. UTILITY: formatTime(seconds)
-        // ==============================
         function formatTime(sec) {
             const h = Math.floor(sec / 3600),
                 m = Math.floor((sec % 3600) / 60),
@@ -226,9 +217,6 @@
             return parts.join(':');
         }
 
-        // ==============================
-        // 4. STATE & DOM REF
-        // ==============================
         const state = {
             mapName: '',
             courseName: '',
@@ -246,9 +234,6 @@
         };
         const appEl = document.getElementById('app');
 
-        // ==============================
-        // 5. FETCH FUNCTIONS
-        // ==============================
         async function fetchProfile(steamId) {
             if (!steamId) return null;
             try {
@@ -304,9 +289,7 @@
             }
         }
 
-        // ---------- GYM API (через прокси) ----------
         async function fetchGymLeaderboard(mapName, courseName, mode, category, playerId) {
-            // Определяем режим для Gym
             let modeStr;
             const lowerMode = mode.toLowerCase();
             if (lowerMode === 'classic' || lowerMode === 'ckz') {
@@ -316,10 +299,10 @@
             } else if (lowerMode === 'kzt') {
                 modeStr = 'kzt';
             } else {
-                modeStr = 'ckz'; // fallback
+                modeStr = 'ckz';
             }
 
-            const course = 0; // всегда 0
+            const course = 0;
             const url = `/gym-proxy?map=${encodeURIComponent(mapName)}&mode=${modeStr}&category=${category}&course=${course}`;
             console.log('[Gym] Proxy URL:', url);
             try {
@@ -362,11 +345,7 @@
                 return { wr: null, pb: null, tier: null };
             }
         }
-        // ---------- end GYM ----------
 
-        // ==============================
-        // 6. BUILD RECORD ROW
-        // ==============================
         function buildRecordRow(type, wr, pb, playerProfile, wrHolderProfile) {
             const label = type === 'all' ? 'ALL' : 'PRO';
             const labelClass = type === 'all' ? 'label-all' : 'label-pro';
@@ -401,7 +380,6 @@
                     row += `<span class="text-amber-600">(+${formatTime(gain)})</span>`;
                 }
 
-                // Если у PB есть ранг – показываем
                 if (pb && pb.rank) {
                     row += `<span class="text-gray-300"> #${pb.rank}</span>`;
                 }
@@ -414,9 +392,6 @@
             return row;
         }
 
-        // ==============================
-        // 7. MAIN UPDATE LOGIC
-        // ==============================
         let previousMapName = '';
         let previousCourseName = '';
 
@@ -445,10 +420,8 @@
                 mapStatus = 'GYM';
             }
 
-            // ---- Tiers ----
             let courseTiers = null;
 
-            // Для Gym – получаем tier из отдельного запроса
             if (globalParam === 'gym' && courseName) {
                 let modeStr;
                 const lowerMode = mode.toLowerCase();
@@ -467,10 +440,9 @@
                             courseTiers = { nub: tierNum, pro: tierNum };
                         }
                     }
-                } catch (e) { /* ignore */ }
+                } catch (e) { }
             }
 
-            // Если не получили – используем старые методы (для не-Gym режимов)
             if (!courseTiers && mapData && mode && courseName) {
                 const course = mapData.courses.find(c => c.name === courseName);
                 if (course && course.filters && course.filters[mode]) {
@@ -484,7 +456,6 @@
                 }
             }
 
-            // ---- WR & PB ----
             let newOverallWr = state.overallWr;
             let newProWr = state.proWr;
             let newOverallPb = state.overallPb;
@@ -493,7 +464,6 @@
             let newProWrHolderProfile = state.proWrHolderProfile;
             let newPlayerProfile = state.playerProfile;
 
-            // ---- GYM branch ----
             if (globalParam === 'gym') {
                 const overallResult = await fetchGymLeaderboard(mapName, courseName, mode, 'nub', playerId);
                 newOverallWr = overallResult.wr;
@@ -507,11 +477,9 @@
 
                 newPlayerProfile = null;
             } else if (mapStatus === 'GLOBAL' && courseName && mode && playerId) {
-                // ---- GLOBAL (cs2kz.org) ----
-                // ... (оригинальный код)
+  
             } else if (mapStatus === 'NON-GLOBAL' && courseName && mode) {
-                // ---- NON-GLOBAL (local) ----
-                // ... (оригинальный код)
+
             }
 
             state.overallWr = newOverallWr;
@@ -522,7 +490,6 @@
             state.proWrHolderProfile = newProWrHolderProfile;
             state.playerProfile = newPlayerProfile;
 
-            // ---- Рендер ----
             let html = '';
             if (mapName) {
                 html += `<div class="flex gap-3">`;
@@ -590,9 +557,6 @@
             appEl.innerHTML = html;
         }
 
-        // ==============================
-        // 8. SSE CONNECTION
-        // ==============================
         function initSSE() {
             const es = new EventSource('http://127.0.0.1:4433/events');
             es.onmessage = function(e) {
