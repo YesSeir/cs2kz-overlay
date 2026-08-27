@@ -145,6 +145,22 @@ type APIRecordsResponse struct {
 	Values []APIRecord `json:"values"`
 }
 
+// ---------- GYM structures ----------
+type GymRecord struct {
+	MapName    string `json:"mapName"`
+	CourseName string `json:"courseName"`
+	CourseID   int    `json:"courseId"`
+	TimeMs     int64  `json:"timeMs"`
+	Teleports  int    `json:"teleports"`
+	PlayerName string `json:"playerName"`
+	SteamID64  string `json:"steamId64"`
+}
+
+type GymRecordsResponse struct {
+	Entries []GymRecord `json:"entries"`
+}
+// ---------- end GYM structures ----------
+
 func loadGlobalApprovedMaps() error {
 	globalCacheMu.Lock()
 	defer globalCacheMu.Unlock()
@@ -238,6 +254,85 @@ func fetchPlayerRecords(steamID uint64, mode string, hasTeleports *bool) ([]APIR
 	return result.Values, nil
 }
 
+// ---------- GYM proxy handlers ----------
+func gymProxyHandler(w http.ResponseWriter, r *http.Request) {
+	mapName := r.URL.Query().Get("map")
+	mode := r.URL.Query().Get("mode")
+	category := r.URL.Query().Get("category")
+	course := r.URL.Query().Get("course")
+
+	if mapName == "" || mode == "" || category == "" || course == "" {
+		http.Error(w, "Missing parameters", http.StatusBadRequest)
+		return
+	}
+
+	targetURL := fmt.Sprintf("https://api.gymstrike.net/v1/kz/maps/%s/leaderboard?mode=%s&category=%s&course=%s",
+		urlEncode(mapName), urlEncode(mode), urlEncode(category), urlEncode(course))
+
+	resp, err := http.Get(targetURL)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		log.Printf("Error copying response: %v", err)
+	}
+}
+
+func gymProxyPlayerHandler(w http.ResponseWriter, r *http.Request) {
+	steamID := r.URL.Query().Get("steamid")
+	mode := r.URL.Query().Get("mode")
+	category := r.URL.Query().Get("category")
+
+	if steamID == "" || mode == "" || category == "" {
+		http.Error(w, "Missing parameters", http.StatusBadRequest)
+		return
+	}
+
+	targetURL := fmt.Sprintf("https://api.gymstrike.net/v1/kz/players/%s/records?mode=%s&category=%s", steamID, mode, category)
+	resp, err := http.Get(targetURL)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Content-Type", resp.Header.Get("Content-Type"))
+	io.Copy(w, resp.Body)
+}
+
+func urlEncode(s string) string {
+	return strings.ReplaceAll(s, " ", "%20")
+}
+
+// fetchGymPlayerRecords вызывает внутренний прокси, чтобы обойти CORS
+func fetchGymPlayerRecords(steamID uint64, mode, category string) ([]GymRecord, error) {
+	url := fmt.Sprintf("http://127.0.0.1:4433/gym-proxy-player?steamid=%d&mode=%s&category=%s", steamID, mode, category)
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	var result GymRecordsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	return result.Entries, nil
+}
+// ---------- end GYM ----------
+
+// ---------- apiProgressHandler с поддержкой global=gym ----------
 func apiProgressHandler(w http.ResponseWriter, r *http.Request) {
 	typeParam := r.URL.Query().Get("type")
 	courseParam := r.URL.Query().Get("course")
@@ -263,6 +358,115 @@ func apiProgressHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	isPro := typeParam == "pro"
 
+	// ---------- GYM ----------
+	if globalParam == "gym" {
+		steamID := gameState.PlayerID
+		if steamID == 0 {
+			result := make(map[string]map[string]int)
+			for i := 1; i <= 8; i++ {
+				result[fmt.Sprintf("%d", i)] = map[string]int{"total": 0, "completed": 0}
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(result)
+			return
+		}
+
+		if err := loadServerMaps(); err != nil {
+			http.Error(w, "Failed to load maps.json: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		serverMapsMu.RLock()
+		maps := serverMapsCache
+		serverMapsMu.RUnlock()
+
+		gymMode := "ckz"
+		if modeStr == "vanilla" {
+			gymMode = "vnl"
+		}
+		gymCategory := "nub"
+		if isPro {
+			gymCategory = "pro"
+		}
+
+		records, err := fetchGymPlayerRecords(steamID, gymMode, gymCategory)
+		if err != nil {
+			log.Printf("[ERROR] Failed to fetch gym player records: %v", err)
+			result := make(map[string]map[string]int)
+			for i := 1; i <= 8; i++ {
+				result[fmt.Sprintf("%d", i)] = map[string]int{"total": 0, "completed": 0}
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(result)
+			return
+		}
+
+		completedMap := make(map[string]bool)
+		for _, rec := range records {
+			key := strings.ToLower(rec.MapName) + "|" + strings.ToLower(rec.CourseName)
+			completedMap[key] = true
+		}
+
+		var tierField string
+		if gymMode == "ckz" {
+			if isPro {
+				tierField = "ckzprotier"
+			} else {
+				tierField = "ckznubtier"
+			}
+		} else {
+			if isPro {
+				tierField = "vnlprotier"
+			} else {
+				tierField = "vnlnubtier"
+			}
+		}
+
+		totalTiers := make(map[int]int)
+		completedTiers := make(map[int]int)
+		for i := 1; i <= 8; i++ {
+			totalTiers[i] = 0
+			completedTiers[i] = 0
+		}
+
+		for _, entry := range maps {
+			mapName, ok1 := entry["mapname"].(string)
+			courseName, ok2 := entry["coursename"].(string)
+			courseid, ok3 := entry["courseid"].(float64)
+			tierVal, ok4 := entry[tierField].(float64)
+			if !ok1 || !ok2 || !ok3 || !ok4 {
+				continue
+			}
+			tier := int(tierVal)
+			if tier < 1 || tier > 8 {
+				continue
+			}
+			if courseParam == "main" && int(courseid) != 0 {
+				continue
+			}
+			if courseParam == "bonus" && int(courseid) == 0 {
+				continue
+			}
+			totalTiers[tier]++
+			key := strings.ToLower(mapName) + "|" + strings.ToLower(courseName)
+			if completedMap[key] {
+				completedTiers[tier]++
+			}
+		}
+
+		result := make(map[string]map[string]int)
+		for i := 1; i <= 8; i++ {
+			result[fmt.Sprintf("%d", i)] = map[string]int{
+				"total":     totalTiers[i],
+				"completed": completedTiers[i],
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result)
+		return
+	}
+	// ---------- end GYM ----------
+
+	// ---------- ОРИГИНАЛЬНЫЙ КОД (без изменений) ----------
 	if globalParam == "false" || globalParam == "0" {
 		if err := loadGlobalApprovedMaps(); err != nil {
 			http.Error(w, "Failed to load global maps: "+err.Error(), http.StatusInternalServerError)
@@ -525,6 +729,7 @@ func apiProgressHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
 }
+// ---------- конец apiProgressHandler ----------
 
 func progressPageHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -733,6 +938,11 @@ func listen() {
 	http.HandleFunc("/local-wr", localWRHandler)
 	http.HandleFunc("/api/progress", apiProgressHandler)
 	http.HandleFunc("/progress", progressPageHandler)
+
+	// ---------- GYM proxy endpoints ----------
+	http.HandleFunc("/gym-proxy", gymProxyHandler)
+	http.HandleFunc("/gym-proxy-player", gymProxyPlayerHandler)
+	// ---------- end GYM ----------
 
 	go func() {
 		if err := http.ListenAndServe("127.0.0.1:4433", nil); err != nil {

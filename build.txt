@@ -9,5 +9,5 @@ git push origin 1.0.0 // create push
 git tag -d 1.0.0 // delete tag
 git push origin --delete 1.0.0 // delete push
 git push -u origin main --force // push without merge
-go build -ldflags="-H=windowsgui -s -w" -o cs2kz-overlay.exe
+go build -ldflags="-H=windowsgui -s -w" -o cs2kz-overlay.exe -buildvcs=false
 rsrc -ico icon.ico -o rsrc.syso

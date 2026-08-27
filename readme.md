@@ -1,3 +1,5 @@
+Changed version of [this](https://github.com/KZGlobalTeam/cs2kz-overlay)
+
 ### Installation
 1. Add `-condebug -conclearlog` to your cs2 launch options
 2. Download [cs2kz-overlay](https://github.com/YesSeir/cs2kz-overlay/releases)
@@ -14,7 +16,7 @@
 |-----------|------------------------------|-------------|
 | `type`    | **`all`** or `pro` | `all` – counts all your personal bests<br>`pro` – counts only pro personal bests |
 | `course`  | **`all`** or `main`, `bonus` | `main` – only the main course of each map<br>`bonus` – only the bonus courses of each map<br>`all` – all courses on each map |
-| `global`  | **`true`** or `false` | `true` – uses data from the official [cs2kz-api](https://docs.cs2kz.org)<br>`false` – uses data from `cs2kz.sqlite` and [maps.json](https://raw.githubusercontent.com/YesSeir/cs2kz-maps/main/maps.json) |
+| `global`  | **`true`** or `false` or `gym` | `true` – uses data from the official [cs2kz-api](https://docs.cs2kz.org)<br>`false` – uses data from `cs2kz.sqlite` and [maps.json](https://raw.githubusercontent.com/YesSeir/cs2kz-maps/main/maps.json)<br>`gym` - uses data from [gymstrike.net](https://gymstrike.net) |
 
 The log file located in: `game/csgo/console.log`
 
