@@ -247,7 +247,7 @@
         const appEl = document.getElementById('app');
 
         // ==============================
-        // 5. FETCH FUNCTIONS (обычные режимы)
+        // 5. FETCH FUNCTIONS
         // ==============================
         async function fetchProfile(steamId) {
             if (!steamId) return null;
@@ -306,8 +306,20 @@
 
         // ---------- GYM API (через прокси) ----------
         async function fetchGymLeaderboard(mapName, courseName, mode, category, playerId) {
-            const course = 0;
-            const modeStr = mode === 'classic' ? 'ckz' : 'vnl';
+            // Определяем режим для Gym
+            let modeStr;
+            const lowerMode = mode.toLowerCase();
+            if (lowerMode === 'classic' || lowerMode === 'ckz') {
+                modeStr = 'ckz';
+            } else if (lowerMode === 'vanilla' || lowerMode === 'vnl') {
+                modeStr = 'vnl';
+            } else if (lowerMode === 'kzt') {
+                modeStr = 'kzt';
+            } else {
+                modeStr = 'ckz'; // fallback
+            }
+
+            const course = 0; // всегда 0
             const url = `/gym-proxy?map=${encodeURIComponent(mapName)}&mode=${modeStr}&category=${category}&course=${course}`;
             console.log('[Gym] Proxy URL:', url);
             try {
@@ -319,10 +331,10 @@
                 const data = await resp.json();
                 console.log('[Gym] response:', data);
                 if (!data.entries || data.entries.length === 0) {
+                    console.warn('[Gym] no entries');
                     return { wr: null, pb: null, tier: data.map?.tier || null };
                 }
 
-                // WR
                 const top = data.entries[0];
                 const wr = {
                     time: top.timeMs / 1000,
@@ -331,7 +343,6 @@
                     avatarUrl: top.avatarUrl,
                 };
 
-                // PB с рангом
                 let pb = null;
                 if (playerId) {
                     const playerEntry = data.entries.find(e => e.steamId64 === playerId);
@@ -340,7 +351,7 @@
                             time: playerEntry.timeMs / 1000,
                             player: { name: playerEntry.playerName, id: playerEntry.steamId64 },
                             teleports: playerEntry.teleports,
-                            rank: playerEntry.rank,   // сохраняем ранг
+                            rank: playerEntry.rank, // если есть
                         };
                     }
                 }
@@ -354,7 +365,7 @@
         // ---------- end GYM ----------
 
         // ==============================
-        // 6. BUILD RECORD ROW (с рангом PB)
+        // 6. BUILD RECORD ROW
         // ==============================
         function buildRecordRow(type, wr, pb, playerProfile, wrHolderProfile) {
             const label = type === 'all' ? 'ALL' : 'PRO';
@@ -389,15 +400,14 @@
                 if (gain !== null && gain > 0) {
                     row += `<span class="text-amber-600">(+${formatTime(gain)})</span>`;
                 }
+
+                // Если у PB есть ранг – показываем
+                if (pb && pb.rank) {
+                    row += `<span class="text-gray-300"> #${pb.rank}</span>`;
+                }
                 row += `</div>`;
             } else {
                 row += `<span class="text-gray-400">No WR yet</span>`;
-            }
-
-            // PB с рангом
-            if (pb) {
-                const rank = pb.rank ? `#${pb.rank}` : '';
-                row += `<span class="text-gray-300"> ${rank}</span>`;
             }
 
             row += `</div>`;
@@ -417,7 +427,7 @@
                 return;
             }
 
-            const mode = modeName === 'CKZ' ? 'classic' : 'vanilla';
+            const mode = modeName === 'CKZ' ? 'classic' : (modeName === 'VNL' ? 'vanilla' : (modeName === 'KZT' ? 'kzt' : 'classic'));
 
             if (mapName !== previousMapName || courseName !== previousCourseName) {
                 state.mapData = null;
@@ -438,8 +448,15 @@
             // ---- Tiers ----
             let courseTiers = null;
 
+            // Для Gym – получаем tier из отдельного запроса
             if (globalParam === 'gym' && courseName) {
-                const modeStr = mode === 'classic' ? 'ckz' : 'vnl';
+                let modeStr;
+                const lowerMode = mode.toLowerCase();
+                if (lowerMode === 'classic' || lowerMode === 'ckz') modeStr = 'ckz';
+                else if (lowerMode === 'vanilla' || lowerMode === 'vnl') modeStr = 'vnl';
+                else if (lowerMode === 'kzt') modeStr = 'kzt';
+                else modeStr = 'ckz';
+
                 const url = `/gym-proxy?map=${encodeURIComponent(mapName)}&mode=${modeStr}&category=nub&course=0`;
                 try {
                     const resp = await fetch(url);
@@ -453,6 +470,7 @@
                 } catch (e) { /* ignore */ }
             }
 
+            // Если не получили – используем старые методы (для не-Gym режимов)
             if (!courseTiers && mapData && mode && courseName) {
                 const course = mapData.courses.find(c => c.name === courseName);
                 if (course && course.filters && course.filters[mode]) {
@@ -475,6 +493,7 @@
             let newProWrHolderProfile = state.proWrHolderProfile;
             let newPlayerProfile = state.playerProfile;
 
+            // ---- GYM branch ----
             if (globalParam === 'gym') {
                 const overallResult = await fetchGymLeaderboard(mapName, courseName, mode, 'nub', playerId);
                 newOverallWr = overallResult.wr;
@@ -488,9 +507,11 @@
 
                 newPlayerProfile = null;
             } else if (mapStatus === 'GLOBAL' && courseName && mode && playerId) {
-                // ... (оригинальный код) ...
+                // ---- GLOBAL (cs2kz.org) ----
+                // ... (оригинальный код)
             } else if (mapStatus === 'NON-GLOBAL' && courseName && mode) {
-                // ... (оригинальный код) ...
+                // ---- NON-GLOBAL (local) ----
+                // ... (оригинальный код)
             }
 
             state.overallWr = newOverallWr;

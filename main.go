@@ -154,6 +154,7 @@ type GymRecord struct {
 	Teleports  int    `json:"teleports"`
 	PlayerName string `json:"playerName"`
 	SteamID64  string `json:"steamId64"`
+	Rank       int    `json:"rank"` // добавим ранг для PB
 }
 
 type GymRecordsResponse struct {
@@ -332,7 +333,7 @@ func fetchGymPlayerRecords(steamID uint64, mode, category string) ([]GymRecord, 
 }
 // ---------- end GYM ----------
 
-// ---------- apiProgressHandler с поддержкой global=gym ----------
+// ---------- apiProgressHandler с поддержкой global=gym и kzt ----------
 func apiProgressHandler(w http.ResponseWriter, r *http.Request) {
 	typeParam := r.URL.Query().Get("type")
 	courseParam := r.URL.Query().Get("course")
@@ -353,8 +354,12 @@ func apiProgressHandler(w http.ResponseWriter, r *http.Request) {
 	var modeStr string
 	if mode == "CKZ" {
 		modeStr = "classic"
-	} else {
+	} else if mode == "VNL" || mode == "vanilla" {
 		modeStr = "vanilla"
+	} else if mode == "KZT" {
+		modeStr = "kzt"
+	} else {
+		modeStr = "classic" // fallback
 	}
 	isPro := typeParam == "pro"
 
@@ -379,10 +384,19 @@ func apiProgressHandler(w http.ResponseWriter, r *http.Request) {
 		maps := serverMapsCache
 		serverMapsMu.RUnlock()
 
-		gymMode := "ckz"
-		if modeStr == "vanilla" {
+		// Определяем gymMode: ckz, vnl, kzt
+		var gymMode string
+		switch strings.ToLower(modeStr) {
+		case "classic", "ckz":
+			gymMode = "ckz"
+		case "vanilla", "vnl":
 			gymMode = "vnl"
+		case "kzt":
+			gymMode = "kzt"
+		default:
+			gymMode = "ckz"
 		}
+
 		gymCategory := "nub"
 		if isPro {
 			gymCategory = "pro"
@@ -406,6 +420,7 @@ func apiProgressHandler(w http.ResponseWriter, r *http.Request) {
 			completedMap[key] = true
 		}
 
+		// Выбираем поле тира в зависимости от режима
 		var tierField string
 		if gymMode == "ckz" {
 			if isPro {
@@ -413,11 +428,17 @@ func apiProgressHandler(w http.ResponseWriter, r *http.Request) {
 			} else {
 				tierField = "ckznubtier"
 			}
-		} else {
+		} else if gymMode == "vnl" {
 			if isPro {
 				tierField = "vnlprotier"
 			} else {
 				tierField = "vnlnubtier"
+			}
+		} else if gymMode == "kzt" {
+			if isPro {
+				tierField = "kztprotier"
+			} else {
+				tierField = "kztnubtier"
 			}
 		}
 
@@ -605,11 +626,24 @@ func apiProgressHandler(w http.ResponseWriter, r *http.Request) {
 		} else {
 			tierField = "ckznubtier"
 		}
-	} else {
+	} else if mode == "VNL" || mode == "vanilla" {
 		if isPro {
 			tierField = "vnlprotier"
 		} else {
 			tierField = "vnlnubtier"
+		}
+	} else if mode == "KZT" {
+		if isPro {
+			tierField = "kztprotier"
+		} else {
+			tierField = "kztnubtier"
+		}
+	} else {
+		// fallback
+		if isPro {
+			tierField = "ckzprotier"
+		} else {
+			tierField = "ckznubtier"
 		}
 	}
 
@@ -669,10 +703,14 @@ func apiProgressHandler(w http.ResponseWriter, r *http.Request) {
 	defer db.Close()
 
 	var modeID int
-	if mode == "CKZ" {
+	if mode == "CKZ" || mode == "KZT" {
+		// В текущей логике KZT может использовать тот же modeID, что и CKZ, или отдельный – уточните.
+		// Пока оставим как CKZ (modeID=2), если нужно отдельно – измените.
 		modeID = 2
-	} else {
+	} else if mode == "VNL" || mode == "vanilla" {
 		modeID = 1
+	} else {
+		modeID = 2 // fallback
 	}
 
 	teleportsCondition := ""
@@ -763,6 +801,7 @@ func localWRHandler(w http.ResponseWriter, r *http.Request) {
 	if mode == "vanilla" {
 		modeID = 1
 	}
+	// Для KZT пока используем тот же modeID, что и CKZ (2) – при необходимости добавьте отдельный режим
 
 	root, err := getCS2Root()
 	if err != nil {
