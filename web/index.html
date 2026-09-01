@@ -289,6 +289,36 @@
             }
         }
 
+        async function fetchLocalPb(mapName, courseName, mode, hasTeleports, playerId) {
+            if (!playerId) return null;
+            const params = new URLSearchParams({
+                map: mapName,
+                course: courseName,
+                mode: mode === 'classic' ? 'classic' : 'vanilla',
+                player: playerId,
+            });
+            if (hasTeleports !== undefined && hasTeleports !== null) {
+                params.append('teleports', hasTeleports ? '1' : '0');
+            }
+            try {
+                const resp = await fetch(`/local-wr?${params.toString()}`);
+                if (!resp.ok) return null;
+                const data = await resp.json();
+                if (data.found) {
+                    return {
+                        time: data.time,
+                        playerName: data.playerName,
+                        steamId: data.steamId,
+                        rank: data.rank, // получаем, но не используем для non-global
+                    };
+                }
+                return null;
+            } catch (e) {
+                console.warn('Failed to fetch local PB:', e);
+                return null;
+            }
+        }
+
         async function fetchGymLeaderboard(mapName, courseName, mode, category, playerId) {
             let modeStr;
             const lowerMode = mode.toLowerCase();
@@ -304,7 +334,6 @@
 
             const course = 0;
             const url = `/gym-proxy?map=${encodeURIComponent(mapName)}&mode=${modeStr}&category=${category}&course=${course}`;
-            console.log('[Gym] Proxy URL:', url);
             try {
                 const resp = await fetch(url);
                 if (!resp.ok) {
@@ -312,9 +341,7 @@
                     return { wr: null, pb: null, tier: null };
                 }
                 const data = await resp.json();
-                console.log('[Gym] response:', data);
                 if (!data.entries || data.entries.length === 0) {
-                    console.warn('[Gym] no entries');
                     return { wr: null, pb: null, tier: data.map?.tier || null };
                 }
 
@@ -334,7 +361,7 @@
                             time: playerEntry.timeMs / 1000,
                             player: { name: playerEntry.playerName, id: playerEntry.steamId64 },
                             teleports: playerEntry.teleports,
-                            rank: playerEntry.rank, // если есть
+                            rank: playerEntry.rank,
                         };
                     }
                 }
@@ -380,6 +407,7 @@
                     row += `<span class="text-amber-600">(+${formatTime(gain)})</span>`;
                 }
 
+                // Ранг показываем только если он есть у PB (для GLOBAL и GYM)
                 if (pb && pb.rank) {
                     row += `<span class="text-gray-300"> #${pb.rank}</span>`;
                 }
@@ -404,25 +432,31 @@
 
             const mode = modeName === 'CKZ' ? 'classic' : (modeName === 'VNL' ? 'vanilla' : (modeName === 'KZT' ? 'kzt' : 'classic'));
 
-            if (mapName !== previousMapName || courseName !== previousCourseName) {
+            // Определяем режим по параметру global
+            let mapStatus;
+            if (globalParam === 'gym') {
+                mapStatus = 'GYM';
+            } else if (globalParam === 'false' || globalParam === '0') {
+                mapStatus = 'NON-GLOBAL';
+            } else {
+                mapStatus = 'GLOBAL'; // default и true
+            }
+
+            // Для GLOBAL пытаемся получить tier из API, для NON-GLOBAL из maps.json
+            if (mapStatus !== 'GYM' && (mapName !== previousMapName || courseName !== previousCourseName)) {
                 state.mapData = null;
                 previousMapName = mapName;
                 previousCourseName = courseName;
             }
 
-            if (!state.mapData && globalParam !== 'gym') {
+            if (!state.mapData && mapStatus !== 'GYM' && mapStatus === 'GLOBAL') {
                 state.mapData = await fetchMapInfo(mapName);
             }
             const mapData = state.mapData;
-            let mapStatus = (mapData && mapData.state === 'approved') ? 'GLOBAL' : 'NON-GLOBAL';
-
-            if (globalParam === 'gym') {
-                mapStatus = 'GYM';
-            }
 
             let courseTiers = null;
-
-            if (globalParam === 'gym' && courseName) {
+            if (mapStatus === 'GYM' && courseName) {
+                // GYM: получаем tier через прокси
                 let modeStr;
                 const lowerMode = mode.toLowerCase();
                 if (lowerMode === 'classic' || lowerMode === 'ckz') modeStr = 'ckz';
@@ -441,10 +475,9 @@
                         }
                     }
                 } catch (e) { }
-            }
-
-            if (!courseTiers && mapData && mode && courseName) {
-                const course = mapData.courses.find(c => c.name === courseName);
+            } else if (mapStatus === 'GLOBAL' && mapData && mode && courseName) {
+                // GLOBAL: tier из API
+                const course = mapData.courses?.find(c => c.name === courseName);
                 if (course && course.filters && course.filters[mode]) {
                     const f = course.filters[mode];
                     if (f.nub_tier && f.pro_tier) {
@@ -454,6 +487,23 @@
                         };
                     }
                 }
+            } else if (mapStatus === 'NON-GLOBAL' && courseName) {
+                // NON-GLOBAL: tier из внешнего maps.json
+                try {
+                    const resp = await fetch('https://raw.githubusercontent.com/YesSeir/cs2kz-maps/main/maps.json');
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        const entry = data.find(e => e.mapname === mapName && e.coursename === courseName);
+                        if (entry) {
+                            const isClassic = (mode === 'classic');
+                            const nub = isClassic ? entry.ckznubtier : entry.vnlnubtier;
+                            const pro = isClassic ? entry.ckzprotier : entry.vnlprotier;
+                            if (nub !== undefined && pro !== undefined) {
+                                courseTiers = { nub, pro };
+                            }
+                        }
+                    }
+                } catch (e) { /* игнорируем ошибки */ }
             }
 
             let newOverallWr = state.overallWr;
@@ -464,7 +514,7 @@
             let newProWrHolderProfile = state.proWrHolderProfile;
             let newPlayerProfile = state.playerProfile;
 
-            if (globalParam === 'gym') {
+            if (mapStatus === 'GYM') {
                 const overallResult = await fetchGymLeaderboard(mapName, courseName, mode, 'nub', playerId);
                 newOverallWr = overallResult.wr;
                 newOverallPb = overallResult.pb;
@@ -477,9 +527,61 @@
 
                 newPlayerProfile = null;
             } else if (mapStatus === 'GLOBAL' && courseName && mode && playerId) {
-  
-            } else if (mapStatus === 'NON-GLOBAL' && courseName && mode) {
+                // Всегда используем API для GLOBAL
+                const pbOverall = await fetchRecords({ top: true, map: mapName, course: courseName, mode,
+                    player: playerId });
+                const pbPro = await fetchRecords({ top: true, map: mapName, course: courseName, mode,
+                    player: playerId, has_teleports: false });
+                newOverallPb = (pbOverall && pbOverall.values?.length) ? pbOverall.values[0] : null;
+                newProPb = (pbPro && pbPro.values?.length) ? pbPro.values[0] : null;
 
+                const wrOverall = await fetchRecords({ top: true, map: mapName, course: courseName, mode,
+                    max_rank: 1 });
+                const wrPro = await fetchRecords({ top: true, map: mapName, course: courseName, mode,
+                    has_teleports: false, max_rank: 1 });
+                newOverallWr = (wrOverall && wrOverall.values?.length) ? wrOverall.values[0] : null;
+                newProWr = (wrPro && wrPro.values?.length) ? wrPro.values[0] : null;
+
+                newOverallWrHolderProfile = newOverallWr ? await fetchProfile(newOverallWr.player.id) : null;
+                newProWrHolderProfile = newProWr ? await fetchProfile(newProWr.player.id) : null;
+                newPlayerProfile = playerId ? await fetchProfile(playerId) : null;
+            } else if (mapStatus === 'NON-GLOBAL' && courseName && mode) {
+                // NON-GLOBAL: локальная БД
+                const wrAll = await fetchLocalWr(mapName, courseName, mode, null);
+                const wrPro = await fetchLocalWr(mapName, courseName, mode, false);
+                newOverallWr = wrAll ? {
+                    time: wrAll.time,
+                    player: { name: wrAll.playerName, id: wrAll.steamId },
+                    teleports: 1,
+                } : null;
+                newProWr = wrPro ? {
+                    time: wrPro.time,
+                    player: { name: wrPro.playerName, id: wrPro.steamId },
+                    teleports: 0,
+                } : null;
+                newOverallWrHolderProfile = wrAll ? await fetchProfile(wrAll.steamId) : null;
+                newProWrHolderProfile = wrPro ? await fetchProfile(wrPro.steamId) : null;
+
+                if (playerId) {
+                    const pbAll = await fetchLocalPb(mapName, courseName, mode, null, playerId);
+                    const pbPro = await fetchLocalPb(mapName, courseName, mode, false, playerId);
+                    newOverallPb = pbAll ? {
+                        time: pbAll.time,
+                        player: { name: pbAll.playerName, id: pbAll.steamId },
+                        teleports: 1,
+                        // rank не добавляем для non-global
+                    } : null;
+                    newProPb = pbPro ? {
+                        time: pbPro.time,
+                        player: { name: pbPro.playerName, id: pbPro.steamId },
+                        teleports: 0,
+                        // rank не добавляем для non-global
+                    } : null;
+                } else {
+                    newOverallPb = null;
+                    newProPb = null;
+                }
+                newPlayerProfile = null;
             }
 
             state.overallWr = newOverallWr;

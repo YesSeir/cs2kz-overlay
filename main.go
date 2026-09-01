@@ -22,10 +22,13 @@ import (
 	"github.com/getlantern/systray"
 )
 
+//go:embed icon.ico
 var iconData []byte
 
+//go:embed web
 var webFS embed.FS
 
+//go:embed web/progress.html
 var progressHTML string
 
 type GameState struct {
@@ -409,7 +412,6 @@ func apiProgressHandler(w http.ResponseWriter, r *http.Request) {
 			completedMap[key] = true
 		}
 
-		// Выбираем поле тира в зависимости от режима
 		var tierField string
 		if gymMode == "ckz" {
 			if isPro {
@@ -625,7 +627,6 @@ func apiProgressHandler(w http.ResponseWriter, r *http.Request) {
 			tierField = "kztnubtier"
 		}
 	} else {
-		// fallback
 		if isPro {
 			tierField = "ckzprotier"
 		} else {
@@ -774,6 +775,7 @@ func localWRHandler(w http.ResponseWriter, r *http.Request) {
 	courseName := r.URL.Query().Get("course")
 	mode := r.URL.Query().Get("mode")
 	teleports := r.URL.Query().Get("teleports")
+	playerID := r.URL.Query().Get("player") // новый параметр
 
 	if mapName == "" || courseName == "" || mode == "" {
 		http.Error(w, "Missing parameters", http.StatusBadRequest)
@@ -807,7 +809,19 @@ func localWRHandler(w http.ResponseWriter, r *http.Request) {
 	defer db.Close()
 
 	query := `
-		SELECT t.RunTime, p.Alias, t.SteamID64
+		SELECT t.RunTime, p.Alias, t.SteamID64,
+		       COALESCE((
+		           SELECT COUNT(*) + 1
+		           FROM Times t2
+		           JOIN MapCourses mc2 ON t2.MapCourseID = mc2.ID
+		           JOIN Maps m2 ON mc2.MapID = m2.ID
+		           WHERE LOWER(m2.Name) = LOWER(?)
+		             AND LOWER(mc2.Name) = LOWER(?)
+		             AND t2.ModeID = ?
+		             AND t2.RunTime > 0
+		             AND t2.RunTime < t.RunTime
+		             AND (t2.Teleports = 0 OR ? != "0")
+		       ), 1) AS Rank
 		FROM Times t
 		JOIN MapCourses mc ON t.MapCourseID = mc.ID
 		JOIN Maps m ON mc.MapID = m.ID
@@ -817,7 +831,7 @@ func localWRHandler(w http.ResponseWriter, r *http.Request) {
 		  AND t.ModeID = ?
 		  AND t.RunTime > 0
 	`
-	args := []interface{}{mapName, courseName, modeID}
+	args := []interface{}{mapName, courseName, modeID, teleports, mapName, courseName, modeID}
 
 	if teleports == "0" {
 		query += " AND t.Teleports = 0"
@@ -825,11 +839,18 @@ func localWRHandler(w http.ResponseWriter, r *http.Request) {
 		query += " AND t.Teleports = 1"
 	}
 
-	query += " ORDER BY t.RunTime ASC LIMIT 1"
+	if playerID != "" {
+		query += " AND t.SteamID64 = ?"
+		args = append(args, playerID)
+		query += " ORDER BY t.RunTime ASC LIMIT 1"
+	} else {
+		query += " ORDER BY t.RunTime ASC LIMIT 1"
+	}
 
 	var runTime float64
 	var playerName, steamID string
-	err = db.QueryRow(query, args...).Scan(&runTime, &playerName, &steamID)
+	var rank int
+	err = db.QueryRow(query, args...).Scan(&runTime, &playerName, &steamID, &rank)
 	if err == sql.ErrNoRows {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{"found": false})
@@ -846,6 +867,7 @@ func localWRHandler(w http.ResponseWriter, r *http.Request) {
 		"time":       runTime,
 		"playerName": playerName,
 		"steamId":    steamID,
+		"rank":       rank,
 	})
 }
 
